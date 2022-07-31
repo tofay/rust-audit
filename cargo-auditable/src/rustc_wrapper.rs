@@ -1,6 +1,6 @@
-use std::{process::Command, env, ffi::OsString};
+use std::{env, ffi::OsString, process::Command};
 
-use crate::{collect_audit_data, target_info, object_file, rustc_arguments};
+use crate::{collect_audit_data, object_file, rustc_arguments, target_info};
 
 use std::io::BufRead;
 
@@ -16,7 +16,13 @@ pub fn main() {
     // Only inject arguments into crate types 'bin' and 'cdylib'
     // What if there are multiple types, you might ask? I have no idea!
     // TODO: check if crates that are both rlib and bin actually work
-    if args.crate_types.contains(&"bin".to_owned()) || args.crate_types.contains(&"cdylib".to_owned()) {
+    //
+    // Also only inject if there's an output directory, so as to ignore
+    // cargo's invocations of rustc that just print rustc config
+    if (args.crate_types.contains(&"bin".to_owned())
+        || args.crate_types.contains(&"cdylib".to_owned()))
+        && args.out_dir.is_some()
+    {
         // Get the audit data to embed
         let contents: Vec<u8> = collect_audit_data::compressed_dependency_list(&args);
         // write the audit info to an object file
@@ -32,7 +38,7 @@ pub fn main() {
         // We can place it anywhere really, the only concern is clutter and name collisions,
         // and the target dir is locked so we're probably good
         let filename = format!("{}_audit_data.o", args.crate_name);
-        let path = args.out_dir.clone().join(filename);
+        let path = args.out_dir.unwrap().join(filename);
         std::fs::write(&path, binfile).expect("Unable to write output file");
 
         // Modify the rustc command to link the object file with audit data
@@ -44,7 +50,9 @@ pub fn main() {
     }
 
     // Invoke rustc
-    let results = command.status().expect("Failed to invoke rustc! Make sure it's in your $PATH");
+    let results = command
+        .status()
+        .expect("Failed to invoke rustc! Make sure it's in your $PATH");
     std::process::exit(results.code().unwrap());
 }
 
